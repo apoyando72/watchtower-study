@@ -2,19 +2,24 @@
 
 const root = document.getElementById("root");
 
-// Reader's own font-size preference for reading/writing 해설 — a per-device
-// comfort setting, so it lives in localStorage rather than shared data.
+// Reader's own font-size preference for reading/writing 해설. Keyed by
+// *who* is logged in (not just this device/browser), so if two different
+// readers share the same phone or computer to log in, one's font choice
+// never leaks into the other's session.
 const FONT_STEP_KEY = "wt-study-fontstep-v1";
 const ANSWER_FONT_SIZES = [14, 16, 18];
 const ANSWER_FONT_LABELS = ["보통", "크게", "아주 크게"];
+function fontStepStorageKey() {
+  return FONT_STEP_KEY + (state.session ? ":" + state.session.kind + ":" + state.session.id : "");
+}
 function loadFontStep() {
   try {
-    const v = parseInt(localStorage.getItem(FONT_STEP_KEY), 10);
+    const v = parseInt(localStorage.getItem(fontStepStorageKey()), 10);
     return isNaN(v) ? 0 : Math.max(0, Math.min(2, v));
   } catch (e) { return 0; }
 }
 function saveFontStep(step) {
-  try { localStorage.setItem(FONT_STEP_KEY, String(step)); } catch (e) {}
+  try { localStorage.setItem(fontStepStorageKey(), String(step)); } catch (e) {}
 }
 
 const state = {
@@ -47,7 +52,7 @@ const state = {
   pwOk: false,
   bodyOpenIds: {},
   answerEditIds: {},
-  answerFontStep: loadFontStep()
+  answerFontStep: 0
 };
 
 let importTimer = null;
@@ -269,6 +274,7 @@ function doLogin() {
     state.session = { kind: "reader", id: reader.id, name: reader.name, role: "reader" };
     Store.saveSession(state.session);
     state.screen = homeFor(state.session);
+    state.answerFontStep = loadFontStep();
     state.loginError = ""; state.pwInput = ""; state.nameInput = "";
     render();
     return;
@@ -281,6 +287,7 @@ function doLogout() {
   Store.clearSession();
   state.session = null;
   state.screen = "login";
+  state.answerFontStep = 0;
   state.nameInput = ""; state.pwInput = ""; state.pw1 = ""; state.pw2 = ""; state.pwMsg = "";
   render();
 }
@@ -1540,7 +1547,10 @@ async function boot() {
     renderBootScreen("서버에 연결할 수 없습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.", true);
     return;
   }
-  if (state.session) state.screen = homeFor(state.session);
+  if (state.session) {
+    state.screen = homeFor(state.session);
+    state.answerFontStep = loadFontStep();
+  }
   render();
 }
 
