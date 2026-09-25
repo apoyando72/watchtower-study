@@ -2,6 +2,21 @@
 
 const root = document.getElementById("root");
 
+// Reader's own font-size preference for reading/writing 해설 — a per-device
+// comfort setting, so it lives in localStorage rather than shared data.
+const FONT_STEP_KEY = "wt-study-fontstep-v1";
+const ANSWER_FONT_SIZES = [14, 16, 18];
+const ANSWER_FONT_LABELS = ["보통", "크게", "아주 크게"];
+function loadFontStep() {
+  try {
+    const v = parseInt(localStorage.getItem(FONT_STEP_KEY), 10);
+    return isNaN(v) ? 0 : Math.max(0, Math.min(2, v));
+  } catch (e) { return 0; }
+}
+function saveFontStep(step) {
+  try { localStorage.setItem(FONT_STEP_KEY, String(step)); } catch (e) {}
+}
+
 const state = {
   data: { program: { sourceUrl: "", issue: "", title: "", subtitle: "", intro: "", items: [] }, readers: [], admins: [], messageTemplate: "" },
   archive: {},
@@ -30,7 +45,8 @@ const state = {
   pw2: "",
   pwMsg: "",
   pwOk: false,
-  bodyOpen: false
+  bodyOpenIds: {},
+  answerFontStep: loadFontStep()
 };
 
 let importTimer = null;
@@ -220,7 +236,7 @@ function normalizeScreen() {
     ? ["import", "edit", "readers", "stage", "profile"]
     : isEditorOnly()
       ? ["edit", "profile"]
-      : ["my", "answer", "profile"];
+      : ["my", "profile"];
   if (allowed.indexOf(state.screen) === -1) state.screen = homeFor(state.session);
 }
 
@@ -319,7 +335,7 @@ function navTabs() {
       ? [["해설 편집", "edit"], ["내 프로필", "profile"]]
       : [["내 항 목록", "my"], ["내 프로필", "profile"]];
   return defs.map(([label, screen]) => h("button", {
-    class: "tab-btn" + (state.screen === screen || (screen === "my" && state.screen === "answer") ? " active" : ""),
+    class: "tab-btn" + (state.screen === screen ? " active" : ""),
     onclick: () => goScreen(screen)
   }, label));
 }
@@ -342,7 +358,6 @@ function screenContent() {
     case "readers": return renderReaders();
     case "profile": return renderProfile();
     case "my": return renderMy();
-    case "answer": return renderAnswer();
     default: return h("div");
   }
 }
@@ -875,7 +890,7 @@ function renderEdit() {
 // `editable` controls whether the question text itself and the "추가/삭제"
 // controls show (owner/editor); the answer textarea is always editable by
 // whoever can already edit the main answer on that screen.
-function renderExtraQuestionBlock(item, editableStructure) {
+function renderExtraQuestionBlock(item, editableStructure, fontSize) {
   const wrap = h("div", { style: "display:flex;flex-direction:column;gap:10px;padding-top:14px;margin-top:2px;border-top:1px solid var(--divider);" });
 
   if (!item.extraQuestion && !editableStructure) return h("div");
@@ -906,7 +921,7 @@ function renderExtraQuestionBlock(item, editableStructure) {
     wrap.appendChild(h("div", { style: "font-family:var(--serif);font-weight:700;font-size:16px;line-height:1.5;" }, item.extraQuestion));
   }
 
-  const extraAnswerEl = liveInput(h("textarea", { class: "input answer-textarea", rows: 4, value: item.extraAnswer, placeholder: "부가 질문에 대한 해설" }), v => {
+  const extraAnswerEl = liveInput(h("textarea", { class: "input answer-textarea", rows: 4, value: item.extraAnswer, placeholder: "부가 질문에 대한 해설", style: fontSize ? "font-size:" + fontSize + "px;" : null }), v => {
     item.extraAnswer = v;
     scheduleFieldSave(item, "extraUpdatedAt", "extra");
   });
@@ -1272,24 +1287,54 @@ function myParagraphs() {
 function renderMy() {
   const mine = myParagraphs();
   const P = state.data.program;
+  const fontSize = ANSWER_FONT_SIZES[state.answerFontStep];
 
-  const cards = mine.map(p => {
+  const fontControl = h("div", { style: "display:flex;align-items:center;gap:8px;flex-wrap:wrap;" },
+    h("span", { style: "font-size:12px;color:var(--ink-4);" }, "해설 글자 크기"),
+    ...ANSWER_FONT_LABELS.map((label, i) => h("button", {
+      class: "tab-btn" + (state.answerFontStep === i ? " active" : ""),
+      onclick: () => { state.answerFontStep = i; saveFontStep(i); render(); }
+    }, label))
+  );
+
+  const blocks = mine.map(p => {
+    const illus = isIllustration(p);
     const badge = badgeFor(p);
-    const savedLabel = h("div", { style: "font-size:13px;color:var(--ink-4);" }, ago(p.updatedAt));
+
+    const bodyBlock = p.body ? h("div", { class: "body-collapse" },
+      h("button", { class: "body-collapse-toggle", onclick: () => { state.bodyOpenIds[p.id] = !state.bodyOpenIds[p.id]; render(); } }, (state.bodyOpenIds[p.id] ? "▾ " : "▸ ") + (illus ? "참고 설명" : "항 본문 (참고용)")),
+      state.bodyOpenIds[p.id] ? h("div", { class: "body-collapse-text" }, p.body) : null
+    ) : null;
+
+    const answerEl = liveInput(h("textarea", { class: "input answer-textarea", rows: 6, placeholder: "맡은 항의 해설을 자유롭게 작성하세요.", value: p.answer, style: "font-size:" + fontSize + "px;" }), v => {
+      p.answer = v;
+      scheduleFieldSave(p, "updatedAt", "main");
+    });
+    answerEl.value = p.answer;
+    answerEl.addEventListener("blur", persistData);
+
+    const savedLabel = h("span", { style: "font-size:13px;color:var(--ink-3);" }, ago(p.updatedAt));
     registerSavedLabel(p, "updatedAt", savedLabel);
-    return h("button", {
-      class: "my-card",
-      onclick: () => { state.selectedId = p.id; state.screen = "answer"; state.bodyOpen = false; render(); }
-    },
+
+    return h("div", { style: "display:flex;flex-direction:column;gap:14px;padding-bottom:26px;border-bottom:1px solid var(--divider);" },
       h("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap;" },
         h("span", { class: "chip-num", style: "padding:4px 11px;font-size:14px;" }, itemChipLabel(p)),
         h("span", { class: sideChipClass(p.side) }, sideLabel(p.side)),
-        h("span", { style: "font-size:13px;color:var(--ink-4);flex:1;min-width:0;" }, p.heading || ""),
+        p.heading ? h("span", { style: "font-size:13px;color:var(--ink-4);" }, p.heading) : null,
         h("span", { class: badge.cls }, badge.label)
       ),
-      isIllustration(p) && p.image ? h("img", { src: p.image, style: "max-width:100%;max-height:140px;border-radius:8px;display:block;object-fit:cover;" }) : null,
-      h("div", { class: "q" }, p.question),
-      savedLabel
+      illus && p.image ? h("img", { src: p.image, style: "max-width:100%;border-radius:12px;display:block;" }) : null,
+      h("div", { style: "font-family:var(--serif);font-size:22px;font-weight:800;line-height:1.5;" }, p.question),
+      bodyBlock,
+      h("div", { style: "display:flex;flex-direction:column;gap:10px;" },
+        h("label", { style: "font-size:13px;font-weight:700;color:var(--ink-2);" }, "해설"),
+        answerEl,
+        h("div", { class: "save-row" },
+          savedLabel,
+          h("button", { class: "btn btn-primary", onclick: () => { p.updatedAt = Date.now(); persistData(); render(); } }, "저장")
+        )
+      ),
+      !illus && p.extraQuestion ? renderExtraQuestionBlock(p, false, fontSize) : null
     );
   });
 
@@ -1297,63 +1342,12 @@ function renderMy() {
     h("div", { style: "display:flex;flex-direction:column;gap:6px;" },
       h("div", { style: "font-size:12px;color:var(--ink-4);" }, P.issue),
       h("h1", { class: "page-title-lg" }, P.title),
-      h("div", { style: "font-size:14px;color:var(--ink-3);" }, mine.length ? "배정된 항 " + mine.length + "개 · 해설을 작성해 주세요." : "")
+      h("div", { style: "font-size:14px;color:var(--ink-3);" }, mine.length ? "배정된 항 " + mine.length + "개" : "")
     ),
+    mine.length ? fontControl : null,
     mine.length
-      ? h("div", { style: "display:flex;flex-direction:column;gap:12px;" }, ...cards)
+      ? h("div", { style: "display:flex;flex-direction:column;gap:26px;" }, ...blocks)
       : h("div", { class: "empty-state" }, "아직 배정된 항이 없습니다. 사회자에게 문의해 주세요.")
-  );
-}
-
-function renderAnswer() {
-  const sel = findItem(state.selectedId);
-  if (!sel) { state.screen = "my"; return renderMy(); }
-  const illus = isIllustration(sel);
-
-  const bodyBlock = sel.body ? h("div", { class: "body-collapse" },
-    h("button", { class: "body-collapse-toggle", onclick: () => { state.bodyOpen = !state.bodyOpen; render(); } }, (state.bodyOpen ? "▾ " : "▸ ") + (illus ? "참고 설명" : "항 본문 (참고용)")),
-    state.bodyOpen ? h("div", { class: "body-collapse-text" }, sel.body) : null
-  ) : null;
-
-  const answerEl = liveInput(h("textarea", { class: "input answer-textarea", rows: 10, placeholder: "맡은 항의 해설을 자유롭게 작성하세요.", value: sel.answer }), v => {
-    sel.answer = v;
-    scheduleFieldSave(sel, "updatedAt", "main");
-  });
-  answerEl.value = sel.answer;
-  answerEl.addEventListener("blur", persistData);
-
-  const savedLabel = h("span", { style: "font-size:13px;color:var(--ink-3);" }, ago(sel.updatedAt));
-  registerSavedLabel(sel, "updatedAt", savedLabel);
-
-  return h("div", { class: "screen-narrow-2" },
-    h("button", { class: "back-link", onclick: () => { state.screen = "my"; render(); } }, "← 내 항 목록"),
-    h("div", { style: "display:flex;flex-direction:column;gap:12px;" },
-      h("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap;" },
-        h("span", { class: "chip-num", style: "padding:4px 11px;font-size:14px;" }, itemChipLabel(sel)),
-        h("span", { class: sideChipClass(sel.side) }, sideLabel(sel.side)),
-        h("span", { style: "font-size:13px;color:var(--ink-4);" }, sel.heading || "")
-      ),
-      illus && sel.image ? h("img", { src: sel.image, style: "max-width:100%;border-radius:12px;display:block;" }) : null,
-      h("div", { style: "font-family:var(--serif);font-size:26px;font-weight:800;line-height:1.45;" }, sel.question)
-    ),
-    bodyBlock,
-    h("div", { style: "display:flex;flex-direction:column;gap:10px;" },
-      h("label", { style: "font-size:13px;font-weight:700;color:var(--ink-2);" }, "해설 (답변)"),
-      answerEl,
-      h("div", { class: "save-row" },
-        savedLabel,
-        h("div", { style: "display:flex;gap:10px;" },
-          h("button", { class: "btn btn-primary", onclick: () => { sel.updatedAt = Date.now(); persistData(); render(); } }, "저장"),
-          h("button", { class: "btn btn-secondary", onclick: () => {
-            const mine = myParagraphs();
-            const i = mine.findIndex(p => p.id === sel.id);
-            const nxt = mine[(i + 1) % Math.max(mine.length, 1)];
-            if (nxt) { state.selectedId = nxt.id; state.bodyOpen = false; render(); }
-          } }, "다음 내 항")
-        )
-      )
-    ),
-    !illus && sel.extraQuestion ? renderExtraQuestionBlock(sel, false) : null
   );
 }
 
