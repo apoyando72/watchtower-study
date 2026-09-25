@@ -209,7 +209,6 @@ p.section-desc { margin: 0; font-size: 13px; color: var(--ink-3); }
 .admin-pw-note { font-size: 12px; color: var(--ink-4); }
 
 .my-card { background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 10px; text-align: left; width: 100%; min-height: 44px; }
-.my-card:hover { border-color: var(--focus-ring); }
 .my-card .q { font-family: var(--serif); font-size: 19px; font-weight: 700; line-height: 1.5; }
 .empty-state { background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 40px 20px; text-align: center; color: var(--ink-4); font-size: 14px; }
 

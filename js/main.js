@@ -46,6 +46,7 @@ const state = {
   pwMsg: "",
   pwOk: false,
   bodyOpenIds: {},
+  answerEditIds: {},
   answerFontStep: loadFontStep()
 };
 
@@ -236,7 +237,7 @@ function normalizeScreen() {
     ? ["import", "edit", "readers", "stage", "profile"]
     : isEditorOnly()
       ? ["edit", "profile"]
-      : ["my", "profile"];
+      : ["my", "myAnswers", "profile"];
   if (allowed.indexOf(state.screen) === -1) state.screen = homeFor(state.session);
 }
 
@@ -358,6 +359,7 @@ function screenContent() {
     case "readers": return renderReaders();
     case "profile": return renderProfile();
     case "my": return renderMy();
+    case "myAnswers": return renderMyAnswers();
     default: return h("div");
   }
 }
@@ -1284,20 +1286,15 @@ function myParagraphs() {
   return state.data.program.items.filter(p => p.readerId === state.session.id);
 }
 
+// ---------- reader home: profile summary + assigned-item overview ----------
+
 function renderMy() {
   const mine = myParagraphs();
   const P = state.data.program;
-  const fontSize = ANSWER_FONT_SIZES[state.answerFontStep];
+  const me = state.session;
+  const reader = state.data.readers.find(r => r.id === me.id);
 
-  const fontControl = h("div", { style: "display:flex;align-items:center;gap:8px;flex-wrap:wrap;" },
-    h("span", { style: "font-size:12px;color:var(--ink-4);" }, "해설 글자 크기"),
-    ...ANSWER_FONT_LABELS.map((label, i) => h("button", {
-      class: "tab-btn" + (state.answerFontStep === i ? " active" : ""),
-      onclick: () => { state.answerFontStep = i; saveFontStep(i); render(); }
-    }, label))
-  );
-
-  const blocks = mine.map(p => {
+  const cards = mine.map(p => {
     const illus = isIllustration(p);
     const badge = badgeFor(p);
 
@@ -1306,48 +1303,119 @@ function renderMy() {
       state.bodyOpenIds[p.id] ? h("div", { class: "body-collapse-text" }, p.body) : null
     ) : null;
 
-    const answerEl = liveInput(h("textarea", { class: "input answer-textarea", rows: 6, placeholder: "맡은 항의 해설을 자유롭게 작성하세요.", value: p.answer, style: "font-size:" + fontSize + "px;" }), v => {
-      p.answer = v;
-      scheduleFieldSave(p, "updatedAt", "main");
-    });
-    answerEl.value = p.answer;
-    answerEl.addEventListener("blur", persistData);
-
-    const savedLabel = h("span", { style: "font-size:13px;color:var(--ink-3);" }, ago(p.updatedAt));
-    registerSavedLabel(p, "updatedAt", savedLabel);
-
-    return h("div", { style: "display:flex;flex-direction:column;gap:14px;padding-bottom:26px;border-bottom:1px solid var(--divider);" },
+    return h("div", { class: "my-card", style: "cursor:default;" },
       h("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap;" },
         h("span", { class: "chip-num", style: "padding:4px 11px;font-size:14px;" }, itemChipLabel(p)),
         h("span", { class: sideChipClass(p.side) }, sideLabel(p.side)),
-        p.heading ? h("span", { style: "font-size:13px;color:var(--ink-4);" }, p.heading) : null,
+        p.heading ? h("span", { style: "font-size:13px;color:var(--ink-4);flex:1;min-width:0;" }, p.heading) : null,
         h("span", { class: badge.cls }, badge.label)
       ),
-      illus && p.image ? h("img", { src: p.image, style: "max-width:100%;border-radius:12px;display:block;" }) : null,
-      h("div", { style: "font-family:var(--serif);font-size:22px;font-weight:800;line-height:1.5;" }, p.question),
-      bodyBlock,
-      h("div", { style: "display:flex;flex-direction:column;gap:10px;" },
-        h("label", { style: "font-size:13px;font-weight:700;color:var(--ink-2);" }, "해설"),
-        answerEl,
-        h("div", { class: "save-row" },
-          savedLabel,
-          h("button", { class: "btn btn-primary", onclick: () => { p.updatedAt = Date.now(); persistData(); render(); } }, "저장")
-        )
-      ),
-      !illus && p.extraQuestion ? renderExtraQuestionBlock(p, false, fontSize) : null
+      illus && p.image ? h("img", { src: p.image, style: "max-width:100%;max-height:140px;border-radius:8px;display:block;object-fit:cover;" }) : null,
+      h("div", { class: "q" }, p.question),
+      bodyBlock
     );
   });
 
   return h("div", { class: "screen-narrow-2" },
+    h("div", { class: "card", style: "display:flex;align-items:center;gap:12px;flex-wrap:wrap;" },
+      h("div", { style: "display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;" },
+        h("div", { style: "font-size:18px;font-weight:700;" }, reader ? reader.name : me.name),
+        reader && reader.congregation ? h("div", { style: "font-size:13px;color:var(--ink-3);" }, reader.congregation) : null
+      ),
+      h("span", { class: roleChipClass() }, roleChipLabel())
+    ),
     h("div", { style: "display:flex;flex-direction:column;gap:6px;" },
       h("div", { style: "font-size:12px;color:var(--ink-4);" }, P.issue),
       h("h1", { class: "page-title-lg" }, P.title),
       h("div", { style: "font-size:14px;color:var(--ink-3);" }, mine.length ? "배정된 항 " + mine.length + "개" : "")
     ),
+    mine.length
+      ? h("div", { style: "display:flex;flex-direction:column;gap:12px;" }, ...cards)
+      : h("div", { class: "empty-state" }, "아직 배정된 항이 없습니다. 사회자에게 문의해 주세요."),
+    h("div", { style: "display:flex;gap:10px;flex-wrap:wrap;padding-top:4px;" },
+      mine.length ? h("button", { class: "btn btn-ink", onclick: () => goScreen("myAnswers") }, "내 해설 보기") : null,
+      h("button", { class: "btn btn-secondary", onclick: () => goScreen("profile") }, "프로필"),
+      h("button", { class: "btn btn-secondary", onclick: doLogout }, "로그아웃")
+    )
+  );
+}
+
+// ---------- reader answers: clean, read-only-by-default review screen ----------
+//
+// Answers render as plain text so a stray tap while scrolling can't put a
+// reader into an accidental edit — each one only becomes an editable
+// textarea after an explicit "수정" tap, and reverts to plain text on 저장.
+
+function renderMyAnswers() {
+  const mine = myParagraphs();
+  const fontSize = ANSWER_FONT_SIZES[state.answerFontStep];
+
+  const fontControl = h("div", { style: "display:flex;align-items:center;gap:8px;flex-wrap:wrap;" },
+    h("span", { style: "font-size:12px;color:var(--ink-4);" }, "글자 크기"),
+    ...ANSWER_FONT_LABELS.map((label, i) => h("button", {
+      class: "tab-btn" + (state.answerFontStep === i ? " active" : ""),
+      onclick: () => { state.answerFontStep = i; saveFontStep(i); render(); }
+    }, label))
+  );
+
+  function answerField(item, field, tsField, debounceKey) {
+    const editKey = item.id + ":" + field;
+    const editing = !!state.answerEditIds[editKey];
+    const savedLabel = h("span", { style: "font-size:12px;color:var(--ink-4);" }, ago(item[tsField]));
+    registerSavedLabel(item, tsField, savedLabel);
+
+    if (!editing) {
+      return h("div", { style: "display:flex;flex-direction:column;gap:8px;" },
+        h("div", { style: "white-space:pre-wrap;line-height:1.8;color:var(--ink);font-size:" + fontSize + "px;" }, item[field] || "아직 작성된 해설이 없습니다."),
+        h("div", { class: "save-row" },
+          savedLabel,
+          h("button", { class: "btn btn-secondary", onclick: () => { state.answerEditIds[editKey] = true; render(); } }, "수정")
+        )
+      );
+    }
+
+    const textEl = liveInput(h("textarea", { class: "input answer-textarea", rows: 6, value: item[field], style: "font-size:" + fontSize + "px;" }), v => {
+      item[field] = v;
+      scheduleFieldSave(item, tsField, debounceKey);
+    });
+    textEl.value = item[field];
+    textEl.addEventListener("blur", persistData);
+
+    return h("div", { style: "display:flex;flex-direction:column;gap:8px;" },
+      textEl,
+      h("div", { class: "save-row" },
+        savedLabel,
+        h("button", { class: "btn btn-primary", onclick: () => {
+          item[tsField] = Date.now();
+          persistData();
+          delete state.answerEditIds[editKey];
+          render();
+        } }, "저장")
+      )
+    );
+  }
+
+  const blocks = mine.map(p => h("div", { style: "display:flex;flex-direction:column;gap:10px;padding-bottom:26px;border-bottom:1px solid var(--divider);" },
+    h("div", { style: "display:flex;align-items:center;gap:8px;flex-wrap:wrap;" },
+      h("span", { class: "chip-num" }, itemChipLabel(p)),
+      h("span", { style: "font-size:14px;color:var(--ink-3);" }, p.question)
+    ),
+    answerField(p, "answer", "updatedAt", "main"),
+    !isIllustration(p) && p.extraQuestion ? h("div", { style: "display:flex;flex-direction:column;gap:10px;margin-top:4px;" },
+      h("div", { style: "font-size:13px;color:var(--ink-3);" }, "부가 질문: " + p.extraQuestion),
+      answerField(p, "extraAnswer", "extraUpdatedAt", "extra")
+    ) : null
+  ));
+
+  return h("div", { class: "screen-narrow-2" },
+    h("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;" },
+      h("h1", { class: "page-title" }, "내 해설"),
+      h("button", { class: "btn btn-secondary", onclick: () => goScreen("my") }, "← 처음으로")
+    ),
     mine.length ? fontControl : null,
     mine.length
-      ? h("div", { style: "display:flex;flex-direction:column;gap:26px;" }, ...blocks)
-      : h("div", { class: "empty-state" }, "아직 배정된 항이 없습니다. 사회자에게 문의해 주세요.")
+      ? h("div", { style: "display:flex;flex-direction:column;gap:24px;" }, ...blocks)
+      : h("div", { class: "empty-state" }, "아직 배정된 항이 없습니다.")
   );
 }
 
