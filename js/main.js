@@ -23,7 +23,13 @@ function saveFontStep(step) {
 }
 
 const state = {
-  data: { program: { sourceUrl: "", issue: "", title: "", subtitle: "", intro: "", items: [] }, readers: [], admins: [], messageTemplate: "" },
+  data: { program: { sourceUrl: "", issue: "", title: "", subtitle: "", intro: "", items: [] }, readers: [], admins: [], messageTemplate: "", attendanceManagers: [] },
+  attendance: {},
+  attendanceLoaded: false,
+  attendanceMissing: false,
+  attendanceMsg: "",
+  attendancePending: 0,
+  newManagerId: "",
   archive: {},
   session: Store.getSession(),
   screen: "login",
@@ -170,6 +176,10 @@ function badgeFor(item) {
 function isOwner() { return !!state.session && state.session.role === "owner"; }
 function isEditorOnly() { return !!state.session && state.session.role === "editor"; }
 function isReader() { return !!state.session && state.session.kind === "reader"; }
+function isAttendanceManager() {
+  if (isOwner()) return true;
+  return isReader() && (state.data.attendanceManagers || []).indexOf(state.session.id) !== -1;
+}
 
 // Tracks every "N분 전 저장됨"-style label on screen so the 20s tick can
 // refresh them without a full re-render. Entries for elements no longer in
@@ -239,16 +249,19 @@ function resizeImageFile(file, maxWidth, quality, cb) {
 function normalizeScreen() {
   if (!state.session) return;
   const allowed = isOwner()
-    ? ["import", "edit", "readers", "stage", "profile"]
+    ? ["import", "edit", "readers", "attendance", "order", "stage", "profile"]
     : isEditorOnly()
-      ? ["edit", "profile"]
-      : ["my", "myAnswers", "profile"];
+      ? ["edit", "order", "profile"]
+      : isAttendanceManager()
+        ? ["my", "myAnswers", "attendance", "order", "profile"]
+        : ["my", "myAnswers", "order", "profile"];
   if (allowed.indexOf(state.screen) === -1) state.screen = homeFor(state.session);
 }
 
 function render() {
   normalizeScreen();
   root.innerHTML = "";
+  syncAttendancePolling();
   if (!state.session) { root.appendChild(renderLogin()); return; }
   if (state.screen === "stage") { root.appendChild(renderStage()); return; }
   root.appendChild(renderShell());
@@ -288,6 +301,7 @@ function doLogout() {
   state.session = null;
   state.screen = "login";
   state.answerFontStep = 0;
+  state.attendanceLoaded = false; state.attendance = {};
   state.nameInput = ""; state.pwInput = ""; state.pw1 = ""; state.pw2 = ""; state.pwMsg = "";
   render();
 }
@@ -338,10 +352,12 @@ function renderShell() {
 
 function navTabs() {
   const defs = isOwner()
-    ? [["가져오기", "import"], ["항 편집", "edit"], ["등단자", "readers"], ["진행 화면", "stage"], ["내 프로필", "profile"]]
+    ? [["가져오기", "import"], ["항 편집", "edit"], ["등단자", "readers"], ["참석 체크", "attendance"], ["등단 순서", "order"], ["진행 화면", "stage"], ["내 프로필", "profile"]]
     : isEditorOnly()
-      ? [["해설 편집", "edit"], ["내 프로필", "profile"]]
-      : [["내 항 목록", "my"], ["내 프로필", "profile"]];
+      ? [["해설 편집", "edit"], ["등단 순서", "order"], ["내 프로필", "profile"]]
+      : isAttendanceManager()
+        ? [["내 항 목록", "my"], ["참석 체크", "attendance"], ["등단 순서", "order"], ["내 프로필", "profile"]]
+        : [["내 항 목록", "my"], ["등단 순서", "order"], ["내 프로필", "profile"]];
   return defs.map(([label, screen]) => h("button", {
     class: "tab-btn" + (state.screen === screen ? " active" : ""),
     onclick: () => goScreen(screen)
@@ -365,6 +381,8 @@ function screenContent() {
     case "edit": return renderEdit();
     case "readers": return renderReaders();
     case "profile": return renderProfile();
+    case "attendance": return renderAttendance();
+    case "order": return renderOrder();
     case "my": return renderMy();
     case "myAnswers": return renderMyAnswers();
     default: return h("div");
@@ -1284,6 +1302,265 @@ function renderProfile() {
   }
 
   return h("div", { class: "screen-narrow" }, ...children);
+}
+
+
+// ---------- stage order table (visible to everyone) ----------
+
+// Display name; when two registered people share a name, the one outside the
+// home congregation gets "(회중명)" so the table never shows two identical entries.
+function displayName(r) {
+  if (!r) return "";
+  const base = r.name + " " + genderLabel(r.gender);
+  const readers = state.data.readers;
+  const dup = readers.filter(x => x.name === r.name).length > 1;
+  if (!dup || !r.congregation) return base;
+  const counts = {};
+  readers.forEach(x => { if (x.congregation) counts[x.congregation] = (counts[x.congregation] || 0) + 1; });
+  const home = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+  return r.congregation === home ? base : base + "(" + r.congregation + ")";
+}
+
+function compressNumbers(nums) {
+  const sorted = Array.from(new Set(nums)).sort((a, b) => a - b);
+  const parts = [];
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++;
+    const len = j - i + 1;
+    if (len >= 3) parts.push(sorted[i] + "-" + sorted[j]);
+    else for (let k = i; k <= j; k++) parts.push(String(sorted[k]));
+    i = j + 1;
+  }
+  return parts.join(",");
+}
+
+// Consecutive items on the same side are one stage turn (e.g. 4-5항 + 6항 are
+// read by a brother and a sister back to back), so they share one row.
+function buildStageTurns() {
+  const turns = { left: [], right: [] };
+  let cur = null;
+  state.data.program.items.forEach(item => {
+    if (!isAssignable(item) || !item.readerId) { cur = null; return; }
+    const side = item.side === "left" ? "left" : "right";
+    if (!cur || cur.side !== side) {
+      cur = { side, items: [] };
+      turns[side].push(cur);
+    }
+    cur.items.push(item);
+  });
+  const toRow = turn => {
+    const nums = [];
+    const reviews = [];
+    const illus = [];
+    turn.items.forEach(it => {
+      if (isIllustration(it)) { illus.push(it); return; }
+      const rv = /^복습\s*(\d+)/.exec(it.num || "");
+      if (rv) { reviews.push(parseInt(rv[1], 10)); return; }
+      String(it.num || "").split(/[-,\s]+/).forEach(t => { const n = parseInt(t, 10); if (!isNaN(n)) nums.push(n); });
+    });
+    const parts = [];
+    if (nums.length) parts.push(compressNumbers(nums) + "항");
+    if (reviews.length) parts.push("복습 " + compressNumbers(reviews));
+    illus.forEach(it => {
+      const m = /(\d+)/.exec(it.heading || "");
+      const own = m && nums.indexOf(parseInt(m[1], 10)) !== -1;
+      if (own) parts.push("삽화");
+      else parts.push(m ? m[1] + "항 삽화" : "삽화");
+    });
+    const names = turn.items.map(it => displayName(findReader(it.readerId))).filter(Boolean);
+    return { label: parts.join(", "), names: names.join(", ") };
+  };
+  return { left: turns.left.map(toRow), right: turns.right.map(toRow) };
+}
+
+function renderOrder() {
+  const t = buildStageTurns();
+  const panel = (title, rows) => h("div", { class: "order-panel" },
+    h("div", { class: "order-panel-title" }, title),
+    rows.length
+      ? rows.map(r => h("div", { class: "order-row" },
+          h("span", { class: "order-label" }, r.label),
+          h("span", { class: "order-names" }, r.names)))
+      : h("div", { class: "order-empty" }, "배정된 항이 없습니다.")
+  );
+  return h("div", { class: "order-wrap" },
+    h("div", { style: "display:flex;flex-direction:column;gap:4px;" },
+      h("h1", { class: "page-title" }, "등단 순서"),
+      h("p", { class: "section-desc" }, (state.data.program.issue || "") + " " + (state.data.program.title || ""))
+    ),
+    h("div", { class: "order-stage" },
+      panel("연단 왼편", t.left),
+      h("div", { class: "order-mc" }, "사회자"),
+      panel("연단 오른편", t.right)
+    ),
+    h("div", { class: "order-audience" }, "청중석")
+  );
+}
+
+// ---------- attendance check (owner + up to two designated helpers) ----------
+
+const ATTENDANCE_KINDS = [
+  { key: "p1", label: ["연습1"] },
+  { key: "p2", label: ["연습2"] },
+  { key: "p3", label: ["연습3"] },
+  { key: "stage", label: ["등단", "연습"] },
+  { key: "wait", label: ["대기"] }
+];
+
+let attendanceTimer = null;
+
+function attendanceSig(map) { return Object.keys(map).sort().join(","); }
+
+async function loadAttendance() {
+  const map = await Store.getAttendance(state.data.program.sourceUrl);
+  if (map === null) { state.attendanceMissing = true; state.attendanceLoaded = true; return false; }
+  state.attendanceMissing = false;
+  const changed = !state.attendanceLoaded || attendanceSig(map) !== attendanceSig(state.attendance);
+  state.attendance = map;
+  state.attendanceLoaded = true;
+  return changed;
+}
+
+// Polls every few seconds while the attendance screen is open so the owner
+// and the two helpers see each other's ticks without reloading.
+function syncAttendancePolling() {
+  const want = !!state.session && state.screen === "attendance" && isAttendanceManager();
+  if (want && !attendanceTimer) {
+    attendanceTimer = setInterval(async () => {
+      if (state.attendancePending > 0 || state.screen !== "attendance") return;
+      if (await loadAttendance()) render();
+    }, 4000);
+  }
+  if (!want && attendanceTimer) { clearInterval(attendanceTimer); attendanceTimer = null; }
+  if (want && !state.attendanceLoaded) {
+    state.attendanceLoaded = true;
+    loadAttendance().then(() => { if (state.screen === "attendance") render(); });
+  }
+}
+
+function toggleAttendance(readerId, kind) {
+  const key = readerId + "|" + kind;
+  const next = !state.attendance[key];
+  if (next) state.attendance[key] = true; else delete state.attendance[key];
+  state.attendanceMsg = "";
+  state.attendancePending++;
+  render();
+  Store.setAttendance(state.data.program.sourceUrl, readerId, kind, next)
+    .catch(err => {
+      console.error("참석 저장 실패:", err);
+      if (next) delete state.attendance[key]; else state.attendance[key] = true;
+      state.attendanceMsg = "저장하지 못했습니다. 인터넷 연결을 확인해 주세요.";
+      render();
+    })
+    .finally(() => { state.attendancePending--; });
+}
+
+// Everyone who holds an item, split by stage side, in item order. Someone with
+// items on both sides shows up under both (their ticks are shared).
+function attendanceGroups() {
+  const groups = { left: [], right: [] };
+  state.data.program.items.forEach(item => {
+    if (!isAssignable(item) || !item.readerId) return;
+    const side = item.side === "left" ? "left" : "right";
+    let g = groups[side].find(x => x.readerId === item.readerId);
+    if (!g) { g = { readerId: item.readerId, items: [] }; groups[side].push(g); }
+    g.items.push(item);
+  });
+  return groups;
+}
+
+function setAttendanceManagers(ids) {
+  state.data.attendanceManagers = ids;
+  Store.saveAttendanceManagers(ids).catch(err => {
+    console.error("담당자 저장 실패:", err);
+    state.attendanceMsg = "담당자를 저장하지 못했습니다. SQL 설정(supabase-attendance.sql)을 먼저 실행했는지 확인해 주세요.";
+    render();
+  });
+  render();
+}
+
+function renderAttendanceManagers() {
+  const ids = state.data.attendanceManagers || [];
+  const chosen = ids.map(id => findReader(id)).filter(Boolean);
+  const candidates = state.data.readers.filter(r => ids.indexOf(r.id) === -1);
+  const selectEl = h("select", { class: "input", style: "min-height:44px;" },
+    h("option", { value: "" }, "등단자 선택…"),
+    ...candidates.map(r => h("option", { value: r.id }, displayName(r))));
+  selectEl.value = state.newManagerId;
+  selectEl.addEventListener("change", () => { state.newManagerId = selectEl.value; });
+  return h("div", { class: "card", style: "display:flex;flex-direction:column;gap:12px;" },
+    h("div", { style: "display:flex;flex-direction:column;gap:4px;" },
+      h("h2", { class: "section-title" }, "참석 체크 담당자 (최대 2명)"),
+      h("p", { class: "section-desc" }, "지정한 두 사람은 로그인하면 이 참석 체크 화면을 볼 수 있고 체크할 수 있습니다. 등단자 명단에 등록된 사람 중에서 고릅니다.")
+    ),
+    chosen.length
+      ? h("div", { class: "chip-wrap" }, ...chosen.map(r => h("span", { class: "chip chip-assign", style: "gap:8px;" },
+          displayName(r),
+          h("button", { class: "chip-x", "aria-label": r.name + " 해제", onclick: () => setAttendanceManagers(ids.filter(x => x !== r.id)) }, "✕"))))
+      : h("span", { class: "chip chip-neutral" }, "지정된 담당자 없음 (소유자만 볼 수 있음)"),
+    ids.length < 2
+      ? h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;" },
+          h("div", { style: "flex:1;min-width:180px;" }, selectEl),
+          h("button", { class: "btn btn-secondary", style: "height:44px;", onclick: () => {
+            if (!state.newManagerId) return;
+            const next = ids.concat([state.newManagerId]);
+            state.newManagerId = "";
+            setAttendanceManagers(next);
+          } }, "담당자로 지정"))
+      : null
+  );
+}
+
+function renderAttendance() {
+  const groups = attendanceGroups();
+  const section = (title, side, list) => {
+    const countFor = kind => list.filter(g => state.attendance[g.readerId + "|" + kind]).length;
+    return h("div", { class: "att-section" },
+      h("div", { class: "att-head" },
+        h("div", { class: "att-head-name" }, h("span", { class: sideChipClass(side) }, title), h("span", { class: "reader-sub" }, list.length + "명")),
+        ...ATTENDANCE_KINDS.map(k => h("div", { class: "att-head-kind" },
+          h("div", { class: "att-kind-label" }, ...k.label.flatMap((t, i) => i ? [h("br"), t] : [t])),
+          h("div", { class: "att-kind-count" }, countFor(k.key) + "/" + list.length)))
+      ),
+      list.length ? list.map(g => {
+        const r = findReader(g.readerId);
+        return h("div", { class: "att-row" },
+          h("div", { class: "att-person" },
+            h("span", { class: "att-items" }, g.items.map(readerAssignedItemShort).join(", ")),
+            h("span", { class: "att-name" }, displayName(r))),
+          ...ATTENDANCE_KINDS.map(k => {
+            const on = !!state.attendance[g.readerId + "|" + k.key];
+            return h("button", {
+              class: "att-box" + (on ? " on" : ""),
+              "aria-pressed": on ? "true" : "false",
+              "aria-label": displayName(r) + " " + k.label.join(""),
+              onclick: () => toggleAttendance(g.readerId, k.key)
+            }, on ? "✓" : "");
+          }));
+      }) : h("div", { class: "order-empty", style: "padding:16px;" }, "배정된 사람이 없습니다.")
+    );
+  };
+
+  return h("div", { class: "att-wrap" },
+    h("div", { style: "display:flex;flex-direction:column;gap:4px;" },
+      h("h1", { class: "page-title" }, "참석 체크"),
+      h("p", { class: "section-desc" }, "칸을 누르면 체크/해제됩니다. 소유자와 담당자의 체크는 몇 초 안에 서로에게 반영됩니다.")
+    ),
+    state.attendanceMissing ? h("div", { class: "banner-warn" }, isOwner()
+      ? "참석 체크 저장소가 아직 서버에 만들어지지 않았습니다. 프로젝트의 supabase-attendance.sql 을 Supabase SQL Editor에서 한 번 실행해 주세요."
+      : "참석 체크 기능이 아직 준비되지 않았습니다. 소유자에게 문의해 주세요.") : null,
+    state.attendanceMsg ? h("div", { class: "banner-error" }, state.attendanceMsg) : null,
+    isOwner() ? renderAttendanceManagers() : null,
+    section("연단 왼편", "left", groups.left),
+    section("연단 오른편", "right", groups.right)
+  );
+}
+
+function readerAssignedItemShort(item) {
+  if (isIllustration(item)) return (item.heading ? item.heading + " " : "") + "삽화";
+  return (item.num || "—") + "항";
 }
 
 // ---------- reader: my list + answer ----------

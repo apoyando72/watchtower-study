@@ -268,3 +268,47 @@ p.section-desc { margin: 0; font-size: 13px; color: var(--ink-3); }
 .stage-illustration-caption { font-size: 15px; color: var(--ink-2); font-style: italic; }
 
 .stage-comment-text { font-size: 16px; line-height: 1.8; color: var(--ink-2); font-style: italic; white-space: pre-wrap; }
+
+/* Stage order table */
+.order-wrap { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+.order-stage { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); gap: 20px; align-items: center; }
+.order-panel { background: #D6D6D6; border-radius: 16px; padding: 28px 20px; display: flex; flex-direction: column; gap: 18px; align-self: stretch; }
+.order-panel-title { display: none; font-size: 13px; font-weight: 700; color: var(--ink-2); }
+.order-row { display: grid; grid-template-columns: minmax(70px, 34%) minmax(0,1fr); gap: 14px; align-items: baseline; }
+.order-label { text-align: right; color: #1F4E79; font-size: clamp(15px, 2vw, 22px); font-weight: 500; }
+.order-names { color: #111; font-size: clamp(15px, 2vw, 22px); font-weight: 500; }
+.order-empty { color: var(--ink-3); font-size: 14px; text-align: center; }
+.order-mc { background: #000; color: #fff; font-weight: 700; font-size: 15px; padding: 24px 10px; text-align: center; }
+.order-audience { background: #000; color: #fff; font-weight: 700; font-size: 22px; text-align: center; padding: 18px; border-radius: 16px 16px 0 0; }
+@media (max-width: 760px) {
+  .order-stage { grid-template-columns: 1fr; gap: 12px; }
+  .order-panel { padding: 18px 16px; }
+  .order-panel-title { display: block; }
+  .order-mc { padding: 12px; }
+  .order-row { grid-template-columns: 78px minmax(0,1fr); gap: 10px; }
+}
+
+/* Attendance check */
+.att-wrap { max-width: 760px; display: flex; flex-direction: column; gap: 20px; }
+.att-section { background: #fff; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.att-head, .att-row { display: grid; grid-template-columns: minmax(0,1fr) repeat(5, 46px); gap: 6px; align-items: center; padding: 10px 12px; }
+.att-head { background: var(--surface); border-bottom: 1px solid var(--border); }
+.att-head-name { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.att-head-kind { text-align: center; }
+.att-kind-label { font-size: 11px; font-weight: 700; color: var(--ink-2); line-height: 1.25; }
+.att-kind-count { font-size: 11px; color: var(--ink-4); margin-top: 2px; }
+.att-row { border-bottom: 1px solid var(--divider); }
+.att-row:last-child { border-bottom: none; }
+.att-person { display: flex; flex-direction: column; min-width: 0; }
+.att-items { font-size: 12px; color: var(--accent); font-weight: 700; }
+.att-name { font-size: 15px; font-weight: 600; }
+.att-box { width: 44px; height: 44px; border-radius: 10px; border: 1.5px solid var(--border-input); background: #fff; font-size: 20px; font-weight: 700; color: #fff; }
+.att-box.on { background: var(--success-ink); border-color: var(--success-ink); }
+.chip-x { background: none; border: none; padding: 0 2px; font-size: 12px; color: var(--accent); cursor: pointer; }
+.att-name { white-space: nowrap; }
+@media (max-width: 639px) {
+  .att-head, .att-row { grid-template-columns: minmax(0,1fr) repeat(5, 38px); gap: 4px; padding: 10px 8px; }
+  .att-box { width: 38px; height: 38px; }
+  .att-name { font-size: 14px; }
+}
+@media (min-width: 640px) { .att-head, .att-row { grid-template-columns: minmax(0,1fr) repeat(5, 64px); } .att-kind-label { font-size: 12px; } }

@@ -183,7 +183,9 @@ const Store = {
       await sb.from("settings").update({ message_template: messageTemplate }).eq("id", 1);
     }
 
-    return { program, readers, admins, messageTemplate };
+    const attendanceManagers = Array.isArray(settings.attendance_managers) ? settings.attendance_managers : [];
+
+    return { program, readers, admins, messageTemplate, attendanceManagers };
   },
 
   async saveData(data) {
@@ -193,6 +195,29 @@ const Store = {
     if (data.admins.length) ops.push(sb.from("admins").upsert(data.admins));
     const results = await Promise.all(ops);
     results.forEach(r => { if (r.error) throw r.error; });
+  },
+
+  // Attendance lives in its own table (one row per person per check) so two
+  // helpers ticking boxes at the same time never overwrite each other.
+  // Returns null if the table hasn't been created yet.
+  async getAttendance(sourceUrl) {
+    const { data, error } = await sb.from("attendance").select("reader_id,kind,checked").eq("source_url", sourceUrl || "");
+    if (error) return null;
+    const map = {};
+    (data || []).forEach(r => { if (r.checked) map[r.reader_id + "|" + r.kind] = true; });
+    return map;
+  },
+
+  async setAttendance(sourceUrl, readerId, kind, checked) {
+    const { error } = await sb.from("attendance").upsert({
+      source_url: sourceUrl || "", reader_id: readerId, kind, checked, updated_at: new Date().toISOString()
+    });
+    if (error) throw error;
+  },
+
+  async saveAttendanceManagers(ids) {
+    const { error } = await sb.from("settings").update({ attendance_managers: ids }).eq("id", 1);
+    if (error) throw error;
   },
 
   async deleteReader(id) {
