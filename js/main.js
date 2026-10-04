@@ -135,7 +135,8 @@ function goScreen(screen) {
 
 function homeFor(session) {
   if (session.kind === "reader") return "my";
-  return session.role === "owner" ? "import" : "edit";
+  if (session.role === "owner") return "import";
+  return session.role === "stage" ? "order" : "edit";
 }
 
 function ago(ts) {
@@ -176,6 +177,7 @@ function badgeFor(item) {
 
 function isOwner() { return !!state.session && state.session.role === "owner"; }
 function isEditorOnly() { return !!state.session && state.session.role === "editor"; }
+function isStageOnly() { return !!state.session && state.session.role === "stage"; }
 function isReader() { return !!state.session && state.session.kind === "reader"; }
 // Sides of the stage this person may tick attendance for: the owner sees
 // both, a designated reader only the side they were assigned.
@@ -256,6 +258,8 @@ function normalizeScreen() {
   if (!state.session) return;
   const allowed = isOwner()
     ? ["import", "edit", "readers", "attendance", "order", "stage", "profile"]
+    : isStageOnly()
+      ? ["order"]
     : isEditorOnly()
       ? ["edit", "order", "profile"]
       : isAttendanceManager()
@@ -359,6 +363,8 @@ function renderShell() {
 function navTabs() {
   const defs = isOwner()
     ? [["가져오기", "import"], ["항 편집", "edit"], ["등단자", "readers"], ["참석 체크", "attendance"], ["등단 순서", "order"], ["진행 화면", "stage"], ["내 프로필", "profile"]]
+    : isStageOnly()
+      ? [["등단 순서", "order"]]
     : isEditorOnly()
       ? [["해설 편집", "edit"], ["등단 순서", "order"], ["내 프로필", "profile"]]
       : isAttendanceManager()
@@ -372,12 +378,13 @@ function navTabs() {
 
 function roleChipLabel() {
   if (isOwner()) return "소유자 · 사회자";
+  if (isStageOnly()) return "무대팀";
   if (isEditorOnly()) return "관리자 · 해설 편집";
   return "등단자";
 }
 function roleChipClass() {
   if (isOwner()) return "chip chip-owner";
-  if (isEditorOnly()) return "chip chip-editor";
+  if (isStageOnly() || isEditorOnly()) return "chip chip-editor";
   return "chip chip-reader";
 }
 
@@ -1283,10 +1290,10 @@ function renderProfile() {
       ),
       h("div", { style: "display:flex;flex-direction:column;gap:10px;" }, ...state.data.admins.map(a => h("div", { class: "admin-row" },
         h("span", { class: "admin-name" }, a.name),
-        h("span", { class: "chip " + (a.role === "owner" ? "chip-owner" : "chip-editor") }, a.role === "owner" ? "소유자 · 전체 권한" : "해설 편집만"),
-        h("span", { class: "admin-pw-note" }, a.role === "owner" ? "비밀번호는 본인만 변경" : "초기 비밀번호 " + a.pw),
+        h("span", { class: "chip " + (a.role === "owner" ? "chip-owner" : "chip-editor") }, a.role === "owner" ? "소유자 · 전체 권한" : a.role === "stage" ? "등단 순서만 보기" : "해설 편집만"),
+        h("span", { class: "admin-pw-note" }, a.role === "owner" ? "비밀번호는 본인만 변경" : (a.role === "stage" ? "비밀번호 " : "초기 비밀번호 ") + a.pw),
         h("div", { style: "flex:1;" }),
-        a.role !== "owner" ? h("button", { class: "btn-danger", style: "border-radius:8px;padding:0 14px;height:40px;font-size:13px;background:#fff;", onclick: () => removeAdmin(a.id) }, "삭제") : null
+        a.role !== "owner" && a.role !== "stage" ? h("button", { class: "btn-danger", style: "border-radius:8px;padding:0 14px;height:40px;font-size:13px;background:#fff;", onclick: () => removeAdmin(a.id) }, "삭제") : null
       ))),
       h("div", { class: "card-dashed grid-auto-180" },
         field("이름", nameEl),

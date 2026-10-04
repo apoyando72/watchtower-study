@@ -82,6 +82,8 @@ function seedReaders() {
   ];
 }
 
+const STAGE_ADMIN = { id: "a-stage", name: "무대팀", pw: "1914", role: "stage" };
+
 function seedAdmins() {
   return [{ id: "a0", name: "김재현", pw: "2643", role: "owner" }];
 }
@@ -176,6 +178,11 @@ const Store = {
     if (!admins || admins.length === 0) {
       admins = seedAdmins();
       await sb.from("admins").upsert(admins);
+    }
+    // The stage crew account always exists (view-only: stage order table).
+    if (!admins.some(a => a.id === STAGE_ADMIN.id)) {
+      await sb.from("admins").upsert(STAGE_ADMIN);
+      admins.push(STAGE_ADMIN);
     }
 
     const messageTemplate = normalizeMessageTemplate(settings.message_template);
