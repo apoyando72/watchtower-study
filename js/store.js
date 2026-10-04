@@ -183,7 +183,10 @@ const Store = {
       await sb.from("settings").update({ message_template: messageTemplate }).eq("id", 1);
     }
 
-    const attendanceManagers = Array.isArray(settings.attendance_managers) ? settings.attendance_managers : [];
+    const am = settings.attendance_managers;
+    const attendanceManagers = am && typeof am === "object" && !Array.isArray(am)
+      ? { left: am.left || "", right: am.right || "" }
+      : { left: "", right: "" };
 
     return { program, readers, admins, messageTemplate, attendanceManagers };
   },
@@ -215,8 +218,8 @@ const Store = {
     if (error) throw error;
   },
 
-  async saveAttendanceManagers(ids) {
-    const { error } = await sb.from("settings").update({ attendance_managers: ids }).eq("id", 1);
+  async saveAttendanceManagers(managers) {
+    const { error } = await sb.from("settings").update({ attendance_managers: managers }).eq("id", 1);
     if (error) throw error;
   },
 

@@ -23,13 +23,14 @@ function saveFontStep(step) {
 }
 
 const state = {
-  data: { program: { sourceUrl: "", issue: "", title: "", subtitle: "", intro: "", items: [] }, readers: [], admins: [], messageTemplate: "", attendanceManagers: [] },
+  data: { program: { sourceUrl: "", issue: "", title: "", subtitle: "", intro: "", items: [] }, readers: [], admins: [], messageTemplate: "", attendanceManagers: { left: "", right: "" } },
   attendance: {},
   attendanceLoaded: false,
   attendanceMissing: false,
   attendanceMsg: "",
   attendancePending: 0,
-  newManagerId: "",
+  newManagerLeft: "",
+  newManagerRight: "",
   archive: {},
   session: Store.getSession(),
   screen: "login",
@@ -176,10 +177,15 @@ function badgeFor(item) {
 function isOwner() { return !!state.session && state.session.role === "owner"; }
 function isEditorOnly() { return !!state.session && state.session.role === "editor"; }
 function isReader() { return !!state.session && state.session.kind === "reader"; }
-function isAttendanceManager() {
-  if (isOwner()) return true;
-  return isReader() && (state.data.attendanceManagers || []).indexOf(state.session.id) !== -1;
+// Sides of the stage this person may tick attendance for: the owner sees
+// both, a designated reader only the side they were assigned.
+function attendanceSides() {
+  if (isOwner()) return ["left", "right"];
+  if (!isReader()) return [];
+  const m = state.data.attendanceManagers || {};
+  return ["left", "right"].filter(side => m[side] === state.session.id);
 }
+function isAttendanceManager() { return attendanceSides().length > 0; }
 
 // Tracks every "N분 전 저장됨"-style label on screen so the 20s tick can
 // refresh them without a full re-render. Entries for elements no longer in
@@ -1471,9 +1477,11 @@ function attendanceGroups() {
   return groups;
 }
 
-function setAttendanceManagers(ids) {
-  state.data.attendanceManagers = ids;
-  Store.saveAttendanceManagers(ids).catch(err => {
+function setAttendanceManager(side, readerId) {
+  const next = Object.assign({ left: "", right: "" }, state.data.attendanceManagers);
+  next[side] = readerId;
+  state.data.attendanceManagers = next;
+  Store.saveAttendanceManagers(next).catch(err => {
     console.error("담당자 저장 실패:", err);
     state.attendanceMsg = "담당자를 저장하지 못했습니다. SQL 설정(supabase-attendance.sql)을 먼저 실행했는지 확인해 주세요.";
     render();
@@ -1482,34 +1490,37 @@ function setAttendanceManagers(ids) {
 }
 
 function renderAttendanceManagers() {
-  const ids = state.data.attendanceManagers || [];
-  const chosen = ids.map(id => findReader(id)).filter(Boolean);
-  const candidates = state.data.readers.filter(r => ids.indexOf(r.id) === -1);
-  const selectEl = h("select", { class: "input", style: "min-height:44px;" },
-    h("option", { value: "" }, "등단자 선택…"),
-    ...candidates.map(r => h("option", { value: r.id }, displayName(r))));
-  selectEl.value = state.newManagerId;
-  selectEl.addEventListener("change", () => { state.newManagerId = selectEl.value; });
-  return h("div", { class: "card", style: "display:flex;flex-direction:column;gap:12px;" },
+  const m = state.data.attendanceManagers || {};
+  const pickerFor = (side, stateKey) => {
+    const current = findReader(m[side]);
+    const selectEl = h("select", { class: "input", style: "min-height:44px;" },
+      h("option", { value: "" }, "등단자 선택…"),
+      ...state.data.readers.map(r => h("option", { value: r.id }, displayName(r))));
+    selectEl.value = state[stateKey];
+    selectEl.addEventListener("change", () => { state[stateKey] = selectEl.value; });
+    return h("div", { style: "display:flex;flex-direction:column;gap:8px;" },
+      h("div", { style: "display:flex;align-items:center;gap:8px;flex-wrap:wrap;" },
+        h("span", { class: sideChipClass(side) }, sideLabel(side)),
+        current
+          ? h("span", { class: "chip chip-assign", style: "gap:8px;" }, displayName(current),
+              h("button", { class: "chip-x", "aria-label": "해제", onclick: () => setAttendanceManager(side, "") }, "✕"))
+          : h("span", { class: "chip chip-neutral" }, "지정 안 됨")),
+      h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;" },
+        h("div", { style: "flex:1;min-width:180px;" }, selectEl),
+        h("button", { class: "btn btn-secondary", style: "height:44px;", onclick: () => {
+          if (!state[stateKey]) return;
+          const id = state[stateKey];
+          state[stateKey] = "";
+          setAttendanceManager(side, id);
+        } }, current ? "변경" : "지정")));
+  };
+  return h("div", { class: "card", style: "display:flex;flex-direction:column;gap:14px;" },
     h("div", { style: "display:flex;flex-direction:column;gap:4px;" },
-      h("h2", { class: "section-title" }, "참석 체크 담당자 (최대 2명)"),
-      h("p", { class: "section-desc" }, "지정한 두 사람은 로그인하면 이 참석 체크 화면을 볼 수 있고 체크할 수 있습니다. 등단자 명단에 등록된 사람 중에서 고릅니다.")
+      h("h2", { class: "section-title" }, "참석 체크 담당"),
+      h("p", { class: "section-desc" }, "왼편 담당 1명, 오른편 담당 1명을 지정합니다. 지정된 사람은 로그인하면 자기 쪽 명단만 보이고 체크할 수 있습니다. 소유자는 양쪽 모두 볼 수 있습니다.")
     ),
-    chosen.length
-      ? h("div", { class: "chip-wrap" }, ...chosen.map(r => h("span", { class: "chip chip-assign", style: "gap:8px;" },
-          displayName(r),
-          h("button", { class: "chip-x", "aria-label": r.name + " 해제", onclick: () => setAttendanceManagers(ids.filter(x => x !== r.id)) }, "✕"))))
-      : h("span", { class: "chip chip-neutral" }, "지정된 담당자 없음 (소유자만 볼 수 있음)"),
-    ids.length < 2
-      ? h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;" },
-          h("div", { style: "flex:1;min-width:180px;" }, selectEl),
-          h("button", { class: "btn btn-secondary", style: "height:44px;", onclick: () => {
-            if (!state.newManagerId) return;
-            const next = ids.concat([state.newManagerId]);
-            state.newManagerId = "";
-            setAttendanceManagers(next);
-          } }, "담당자로 지정"))
-      : null
+    pickerFor("left", "newManagerLeft"),
+    pickerFor("right", "newManagerRight")
   );
 }
 
@@ -1546,15 +1557,14 @@ function renderAttendance() {
   return h("div", { class: "att-wrap" },
     h("div", { style: "display:flex;flex-direction:column;gap:4px;" },
       h("h1", { class: "page-title" }, "참석 체크"),
-      h("p", { class: "section-desc" }, "칸을 누르면 체크/해제됩니다. 소유자와 담당자의 체크는 몇 초 안에 서로에게 반영됩니다.")
+      h("p", { class: "section-desc" }, "칸을 누르면 체크/해제됩니다. 체크한 내용은 몇 초 안에 다른 사람 화면에도 반영됩니다.")
     ),
     state.attendanceMissing ? h("div", { class: "banner-warn" }, isOwner()
       ? "참석 체크 저장소가 아직 서버에 만들어지지 않았습니다. 프로젝트의 supabase-attendance.sql 을 Supabase SQL Editor에서 한 번 실행해 주세요."
       : "참석 체크 기능이 아직 준비되지 않았습니다. 소유자에게 문의해 주세요.") : null,
     state.attendanceMsg ? h("div", { class: "banner-error" }, state.attendanceMsg) : null,
     isOwner() ? renderAttendanceManagers() : null,
-    section("연단 왼편", "left", groups.left),
-    section("연단 오른편", "right", groups.right)
+    ...attendanceSides().map(side => section(sideLabel(side), side, groups[side]))
   );
 }
 

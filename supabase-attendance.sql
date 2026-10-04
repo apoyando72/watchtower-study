@@ -12,4 +12,4 @@ alter table attendance enable row level security;
 drop policy if exists "open" on attendance;
 create policy "open" on attendance for all using (true) with check (true);
 
-alter table settings add column if not exists attendance_managers jsonb not null default '[]'::jsonb;
+alter table settings add column if not exists attendance_managers jsonb not null default '{}'::jsonb;
