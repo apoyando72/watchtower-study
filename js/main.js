@@ -62,7 +62,9 @@ const state = {
   pwOk: false,
   bodyOpenIds: {},
   answerEditIds: {},
-  answerFontStep: 0
+  answerFontStep: 0,
+  capture: null,
+  captureBusy: false
 };
 
 let importTimer = null;
@@ -131,6 +133,7 @@ async function refreshData() {
 // Switches screens immediately with whatever is cached locally (snappy),
 // then quietly refreshes from the server and re-renders once that lands.
 function goScreen(screen) {
+  closeCapture();
   state.screen = screen;
   render();
   refreshData().then(ok => { if (ok) render(); });
@@ -310,6 +313,7 @@ function doLogin() {
 }
 
 function doLogout() {
+  closeCapture();
   Store.clearSession();
   state.session = null;
   state.screen = "login";
@@ -1690,6 +1694,102 @@ function renderMy() {
 // reader into an accidental edit — each one only becomes an editable
 // textarea after an explicit "수정" tap, and reverts to plain text on 저장.
 
+// ---------- capture my 해설 as a clean image ----------
+
+// Draws only the answer text on a plain white canvas at the reader's chosen
+// font size (same px as on screen), so the saved image is just their 해설.
+async function makeAnswerImage(text, fontSize) {
+  try { await document.fonts.ready; } catch (e) {}
+  const scale = 3;
+  const width = Math.max(320, Math.min(window.innerWidth, 480));
+  const pad = 20;
+  const lineH = Math.round(fontSize * 1.8);
+  const family = getComputedStyle(document.body).fontFamily;
+  const font = "400 " + fontSize + "px " + family;
+  const measure = document.createElement("canvas").getContext("2d");
+  measure.font = font;
+  const maxW = width - pad * 2;
+
+  const lines = [];
+  String(text).split("\n").forEach(par => {
+    if (!par.trim()) { lines.push(""); return; }
+    let line = "";
+    par.split(" ").forEach(word => {
+      const tryLine = line ? line + " " + word : word;
+      if (measure.measureText(tryLine).width <= maxW) { line = tryLine; return; }
+      if (line) { lines.push(line); line = ""; }
+      if (measure.measureText(word).width <= maxW) { line = word; return; }
+      Array.from(word).forEach(ch => {
+        if (measure.measureText(line + ch).width > maxW && line) { lines.push(line); line = ""; }
+        line += ch;
+      });
+    });
+    lines.push(line);
+  });
+
+  const height = pad * 2 + lines.length * lineH;
+  const canvas = document.createElement("canvas");
+  canvas.width = width * scale;
+  canvas.height = height * scale;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(scale, scale);
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#1D2126";
+  ctx.font = font;
+  ctx.textBaseline = "middle";
+  lines.forEach((l, i) => ctx.fillText(l, pad, pad + i * lineH + lineH / 2));
+  const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+  return { blob, width };
+}
+
+async function openCapture(item, field) {
+  if (state.captureBusy) return;
+  state.captureBusy = true;
+  try {
+    const fontSize = ANSWER_FONT_SIZES[state.answerFontStep];
+    const { blob, width } = await makeAnswerImage(item[field], fontSize);
+    closeCapture();
+    state.capture = { url: URL.createObjectURL(blob), blob, width, name: "해설_" + itemChipLabel(item) + ".png" };
+  } catch (e) {
+    console.error("이미지 만들기 실패:", e);
+    alert("이미지를 만들지 못했습니다.");
+  }
+  state.captureBusy = false;
+  render();
+}
+
+function closeCapture() {
+  if (state.capture) { URL.revokeObjectURL(state.capture.url); state.capture = null; }
+}
+
+async function saveCapture() {
+  const c = state.capture;
+  if (!c) return;
+  const file = new File([c.blob], c.name, { type: "image/png" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); return; } catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = c.url; a.download = c.name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+function renderCaptureOverlay() {
+  const c = state.capture;
+  if (!c) return null;
+  return h("div", { class: "capture-overlay", onclick: e => { if (e.target === e.currentTarget) { closeCapture(); render(); } } },
+    h("div", { class: "capture-box" },
+      h("div", { class: "capture-img-wrap" },
+        h("img", { src: c.url, alt: "내 해설 이미지", style: "width:" + c.width + "px;max-width:100%;display:block;" })),
+      h("div", { class: "capture-hint" }, "이미지를 길게 눌러 저장하거나, 아래 버튼을 누르세요."),
+      h("div", { style: "display:flex;gap:8px;" },
+        h("button", { class: "btn btn-primary", style: "flex:1;height:46px;", onclick: saveCapture }, "저장 / 공유"),
+        h("button", { class: "btn btn-plain", style: "height:46px;", onclick: () => { closeCapture(); render(); } }, "닫기"))
+    )
+  );
+}
+
 function renderMyAnswers() {
   const mine = myParagraphs();
   const fontSize = ANSWER_FONT_SIZES[state.answerFontStep];
@@ -1713,7 +1813,10 @@ function renderMyAnswers() {
         h("div", { style: "white-space:pre-wrap;line-height:1.8;color:var(--ink);font-size:" + fontSize + "px;" }, item[field] || "아직 작성된 해설이 없습니다."),
         h("div", { class: "save-row" },
           savedLabel,
-          h("button", { class: "btn btn-secondary", onclick: () => { state.answerEditIds[editKey] = true; render(); } }, "수정")
+          h("div", { style: "display:flex;gap:8px;" },
+            item[field] ? h("button", { class: "btn btn-plain", disabled: state.captureBusy, onclick: () => openCapture(item, field) }, "이미지로 저장") : null,
+            h("button", { class: "btn btn-secondary", onclick: () => { state.answerEditIds[editKey] = true; render(); } }, "수정")
+          )
         )
       );
     }
@@ -1759,7 +1862,8 @@ function renderMyAnswers() {
     mine.length ? fontControl : null,
     mine.length
       ? h("div", { style: "display:flex;flex-direction:column;gap:24px;" }, ...blocks)
-      : h("div", { class: "empty-state" }, "아직 배정된 항이 없습니다.")
+      : h("div", { class: "empty-state" }, "아직 배정된 항이 없습니다."),
+    renderCaptureOverlay()
   );
 }
 
