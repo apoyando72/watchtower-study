@@ -82,6 +82,16 @@ function seedReaders() {
   ];
 }
 
+const DEFAULT_ORDER_NOTES = [
+  "대기실에 순서대로 줄 서 있을 때 무대팀 안내에 잘 따라 주세요.",
+  "앞 사람을 꼭 확인해주시고 마이크를 받는 즉시 나와서 줄에 맞춰 서 주세요.",
+  "마이크는 나오기 전 전원을 확인해주시고 중앙을 꼭 잡아주시고 입에 가까이 대고 말해주세요.",
+  "말이 끝났으면 저의 칭찬 맨트를 듣고 인사하지 말고 들어가주세요.",
+  "자연스럽게 하기 위해 외우시되 현장에서는 너무 외우려고 하지 말고 자연스럽게 봐주세요.",
+  "원고를 보는 매체를 확정해주세요.",
+  "대회 당일 오전 8시 등단 연습, 오후 회기 시작하면 바로 연사 대기실로 와 주세요."
+].join("\n");
+
 const STAGE_ADMIN = { id: "a-stage", name: "무대팀", pw: "1914", role: "stage" };
 
 function seedAdmins() {
@@ -195,7 +205,9 @@ const Store = {
       ? { left: am.left || "", right: am.right || "" }
       : { left: "", right: "" };
 
-    return { program, readers, admins, messageTemplate, attendanceManagers };
+    const orderNotes = typeof settings.order_notes === "string" ? settings.order_notes : DEFAULT_ORDER_NOTES;
+
+    return { program, readers, admins, messageTemplate, attendanceManagers, orderNotes };
   },
 
   async saveData(data) {
@@ -222,6 +234,11 @@ const Store = {
     const { error } = await sb.from("attendance").upsert({
       source_url: sourceUrl || "", reader_id: readerId, kind, checked, updated_at: new Date().toISOString()
     });
+    if (error) throw error;
+  },
+
+  async saveOrderNotes(text) {
+    const { error } = await sb.from("settings").update({ order_notes: text }).eq("id", 1);
     if (error) throw error;
   },
 

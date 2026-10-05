@@ -23,7 +23,10 @@ function saveFontStep(step) {
 }
 
 const state = {
-  data: { program: { sourceUrl: "", issue: "", title: "", subtitle: "", intro: "", items: [] }, readers: [], admins: [], messageTemplate: "", attendanceManagers: { left: "", right: "" } },
+  data: { program: { sourceUrl: "", issue: "", title: "", subtitle: "", intro: "", items: [] }, readers: [], admins: [], messageTemplate: "", attendanceManagers: { left: "", right: "" }, orderNotes: "" },
+  notesEditing: false,
+  notesDraft: "",
+  notesMsg: "",
   attendance: {},
   attendanceLoaded: false,
   attendanceMissing: false,
@@ -1408,8 +1411,48 @@ function renderOrder() {
       h("div", { class: "order-mc" }, "사회자"),
       panel("연단 오른편", t.right)
     ),
-    h("div", { class: "order-audience" }, "청중석")
+    h("div", { class: "order-audience" }, "청중석"),
+    renderOrderNotes()
   );
+}
+
+function renderOrderNotes() {
+  const lines = String(state.data.orderNotes || "").split("\n").map(l => l.trim()).filter(Boolean);
+  const header = h("div", { class: "notes-head" },
+    h("h2", { class: "notes-title" }, "파수대 해설시 유의 사항"),
+    isOwner() && !state.notesEditing
+      ? h("button", { class: "btn btn-secondary", style: "height:40px;", onclick: () => {
+          state.notesDraft = String(state.data.orderNotes || ""); state.notesMsg = ""; state.notesEditing = true; render();
+        } }, "수정")
+      : null
+  );
+  if (isOwner() && state.notesEditing) {
+    const ta = liveInput(h("textarea", { class: "input", rows: Math.max(8, lines.length + 2), style: "font-size:15px;line-height:1.7;", value: state.notesDraft }), v => state.notesDraft = v);
+    ta.value = state.notesDraft;
+    return h("div", { class: "notes-wrap" }, header,
+      h("p", { class: "section-desc" }, "한 줄에 하나씩 적으면 번호가 자동으로 붙습니다."),
+      ta,
+      state.notesMsg ? h("div", { class: "banner-error" }, state.notesMsg) : null,
+      h("div", { style: "display:flex;gap:8px;" },
+        h("button", { class: "btn btn-primary", style: "height:44px;", onclick: () => {
+          const text = state.notesDraft;
+          Store.saveOrderNotes(text).then(() => {
+            state.data.orderNotes = text; state.notesEditing = false; render();
+          }).catch(err => {
+            console.error("유의사항 저장 실패:", err);
+            state.notesMsg = "저장하지 못했습니다. SQL 설정(supabase-order-notes.sql)을 먼저 실행했는지 확인해 주세요.";
+            render();
+          });
+        } }, "저장"),
+        h("button", { class: "btn btn-plain", style: "height:44px;", onclick: () => { state.notesEditing = false; render(); } }, "취소")
+      )
+    );
+  }
+  if (!lines.length && !isOwner()) return null;
+  return h("div", { class: "notes-wrap" }, header,
+    lines.length
+      ? h("ol", { class: "notes-list" }, ...lines.map(l => h("li", null, l)))
+      : h("p", { class: "section-desc" }, "아직 유의 사항이 없습니다. 수정 버튼으로 추가하세요."));
 }
 
 // ---------- attendance check (owner + up to two designated helpers) ----------

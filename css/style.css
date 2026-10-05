@@ -312,3 +312,10 @@ p.section-desc { margin: 0; font-size: 13px; color: var(--ink-3); }
   .att-name { font-size: 14px; }
 }
 @media (min-width: 640px) { .att-head, .att-row { grid-template-columns: minmax(0,1fr) repeat(5, 64px); } .att-kind-label { font-size: 12px; } }
+
+/* Order page notes */
+.notes-wrap { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+.notes-head { background: #D6D6D6; border-radius: 16px; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.notes-title { margin: 0; font-size: clamp(18px, 2.4vw, 26px); font-weight: 800; color: #111; }
+.notes-list { margin: 0; padding: 0 8px 0 36px; display: flex; flex-direction: column; gap: 14px; font-size: clamp(15px, 1.9vw, 21px); line-height: 1.6; color: #111; }
+.notes-list li { padding-left: 6px; }
