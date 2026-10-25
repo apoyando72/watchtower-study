@@ -1891,6 +1891,14 @@ function exitStage() {
   render();
 }
 
+// Closed by default so the stage view stays short; tap to read the paragraph.
+function collapsibleBody(label, content) {
+  return h("details", { class: "stage-body" },
+    h("summary", null, label + " 보기"),
+    content
+  );
+}
+
 function renderStage() {
   requestWakeLock();
   const P = state.data.program;
@@ -1918,17 +1926,17 @@ function renderStage() {
     const illus = isIllustration(item);
     if (illus) {
       if (item.image) blocks.push(h("img", { class: "stage-illustration-img", src: item.image }));
-      if (item.body) blocks.push(h("div", { class: "stage-para-text" }, item.body));
+      if (item.body) blocks.push(collapsibleBody("삽화 본문", h("div", { class: "stage-para-text" }, item.body)));
       if (item.question) {
         blocks.push(h("div", { class: "chip-num stage-tag" }, "삽화 설명"));
         blocks.push(h("div", { class: "stage-illustration-caption" }, item.question));
       }
     } else {
       if (item.body) {
-        blocks.push(h("div", { class: "stage-para-text" },
+        blocks.push(collapsibleBody((item.num || "—") + "항 본문", h("div", { class: "stage-para-text" },
           h("span", { class: "stage-para-num" }, item.num),
           " " + item.body
-        ));
+        )));
       }
       if (item.question) {
         blocks.push(h("div", { class: "chip-num stage-tag" }, (item.num || "—") + "항 질문"));
@@ -1938,7 +1946,7 @@ function renderStage() {
 
     const reader = findReader(item.readerId);
     const readerBadge = reader
-      ? h("span", { class: "chip chip-assign" }, h("strong", null, reader.name), " " + genderLabel(reader.gender) + (reader.congregation ? "(" + reader.congregation + ")" : ""))
+      ? h("span", { class: "chip chip-assign" }, h("strong", null, reader.name), genderLabel(reader.gender) + (reader.congregation ? "(" + reader.congregation + ")" : ""))
       : h("span", { class: "chip chip-neutral" }, "등단자 미배정");
     blocks.push(h("div", { class: "stage-assign-line" },
       h("span", { class: sideChipClass(item.side) }, sideLabel(item.side)),

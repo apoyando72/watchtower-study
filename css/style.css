@@ -260,7 +260,16 @@ p.section-desc { margin: 0; font-size: 13px; color: var(--ink-3); }
 .stage-para-text { font-size: 17px; line-height: 1.85; color: var(--ink); }
 .stage-para-question { font-family: var(--serif); font-weight: 700; font-size: 19px; line-height: 1.6; }
 .stage-tag { display: inline-block; align-self: flex-start; margin-bottom: 2px; font-size: 12px; }
-.stage-assign-line { font-size: 15px; color: var(--ink-3); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.stage-assign-line { font-size: 15px; color: var(--ink-3); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.stage-assign-line .chip { font-size: 22px; padding: 8px 16px; border-radius: 10px; }
+.stage-assign-line .chip strong { margin-right: 8px; }
+.stage-body { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 0 16px; }
+.stage-body > summary { cursor: pointer; font-size: 15px; font-weight: 700; color: var(--accent); min-height: 48px; display: flex; align-items: center; list-style: none; }
+.stage-body > summary::-webkit-details-marker { display: none; }
+.stage-body > summary::before { content: "▸"; display: inline-block; margin-right: 8px; transition: transform 0.15s; }
+.stage-body[open] > summary::before { transform: rotate(90deg); }
+.stage-body[open] { padding-bottom: 16px; }
+.stage-body[open] > summary { border-bottom: 1px solid var(--divider); margin-bottom: 12px; }
 .stage-answer-text { font-size: 16px; line-height: 1.8; color: var(--ink-2); white-space: pre-wrap; padding-left: 14px; }
 .stage-divider { border: none; border-top: 1px solid var(--border-input); margin: 4px 0; }
 
