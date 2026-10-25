@@ -147,7 +147,8 @@ function programToRow(program) {
     subtitle: program.subtitle,
     intro: program.intro,
     items: program.items,
-    updated_at: new Date().toISOString()
+    updated_at: new Date().toISOString(),
+    write_nonce: Date.now() + "-" + Math.random().toString(36).slice(2)
   };
 }
 
