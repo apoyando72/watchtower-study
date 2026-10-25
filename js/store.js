@@ -160,6 +160,71 @@ async function fetchSettings() {
   return fresh;
 }
 
+// ---------- merge so one person's save never wipes another's edits ----------
+//
+// Every device holds its own copy of the program and used to upsert the whole
+// row, so a stale copy (e.g. a reader who loaded the page before the owner
+// edited a comment) silently overwrote newer edits. Now each save is a
+// three-way merge, field by field: local = this device's copy, base = what
+// this device last synced, server = the row as it is right now. A field this
+// device didn't change takes the server's value; one it did change wins.
+
+const PROGRAM_SCALARS = ["issue", "title", "subtitle", "intro"];
+
+function jsonSame(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
+function snapshotProgram(program) {
+  const byId = {};
+  program.items.forEach(i => { byId[i.id] = JSON.parse(JSON.stringify(i)); });
+  const scalars = {};
+  PROGRAM_SCALARS.forEach(k => { scalars[k] = program[k]; });
+  return { sourceUrl: program.sourceUrl || "", order: program.items.map(i => i.id), byId, scalars };
+}
+
+function mergeItems(local, base, server) {
+  const localById = {}; local.forEach(i => { localById[i.id] = i; });
+  const serverById = {}; server.forEach(i => { serverById[i.id] = i; });
+  const merged = {};
+
+  local.forEach(l => {
+    const b = base.byId[l.id];
+    const s = serverById[l.id];
+    if (!b) { merged[l.id] = l; return; }
+    const keys = Array.from(new Set(Object.keys(l).concat(Object.keys(b)))).filter(k => typeof l[k] !== "function");
+    const changed = keys.filter(k => !jsonSame(l[k], b[k]));
+    if (!s) { if (changed.length) merged[l.id] = l; return; }
+    const out = Object.assign({}, s);
+    changed.forEach(k => { out[k] = l[k]; });
+    merged[l.id] = out;
+  });
+  server.forEach(s => { if (!base.byId[s.id] && !merged[s.id]) merged[s.id] = s; });
+
+  const localOrder = local.map(i => i.id);
+  const commonLocal = localOrder.filter(id => base.byId[id]);
+  const commonBase = base.order.filter(id => localById[id]);
+  const reordered = !jsonSame(commonLocal, commonBase);
+
+  const insertAfter = (order, id, prevIds) => {
+    for (let i = prevIds.length - 1; i >= 0; i--) {
+      const at = order.indexOf(prevIds[i]);
+      if (at !== -1) { order.splice(at + 1, 0, id); return; }
+    }
+    order.unshift(id);
+  };
+
+  let order;
+  if (reordered) {
+    order = localOrder.filter(id => merged[id]);
+    const serverIds = server.map(i => i.id);
+    serverIds.forEach((id, idx) => { if (merged[id] && order.indexOf(id) === -1) insertAfter(order, id, serverIds.slice(0, idx)); });
+  } else {
+    const serverIds = server.map(i => i.id);
+    order = serverIds.filter(id => merged[id]);
+    localOrder.forEach((id, idx) => { if (merged[id] && order.indexOf(id) === -1) insertAfter(order, id, localOrder.slice(0, idx)); });
+  }
+  return order.map(id => merged[id]);
+}
+
 const Store = {
   async getData() {
     const settings = await fetchSettings();
@@ -210,11 +275,31 @@ const Store = {
     return { program, readers, admins, messageTemplate, attendanceManagers, orderNotes };
   },
 
-  async saveData(data) {
-    const ops = [sb.from("programs").upsert(programToRow(data.program))];
-    ops.push(sb.from("settings").upsert({ id: 1, active_source_url: data.program.sourceUrl || "", message_template: data.messageTemplate }));
-    if (data.readers.length) ops.push(sb.from("readers").upsert(data.readers));
-    if (data.admins.length) ops.push(sb.from("admins").upsert(data.admins));
+  // opts.base: snapshot from snapshotProgram() of what this device last synced.
+  // opts.full: owner only — also writes settings/readers/admins. Readers and
+  // helpers only ever write the program, so a stale copy of the rest can't
+  // undo the owner's changes.
+  async saveData(data, opts) {
+    opts = opts || {};
+    const program = data.program;
+    let row = programToRow(program);
+    if (opts.base && opts.base.sourceUrl === (program.sourceUrl || "")) {
+      const { data: server, error } = await sb.from("programs").select("*").eq("source_url", program.sourceUrl || "").maybeSingle();
+      if (error) throw error;
+      if (server) {
+        const serverProgram = rowToProgram(server);
+        row.items = mergeItems(program.items, opts.base, serverProgram.items);
+        PROGRAM_SCALARS.forEach(k => {
+          if (jsonSame(program[k], opts.base.scalars[k])) row[k] = serverProgram[k];
+        });
+      }
+    }
+    const ops = [sb.from("programs").upsert(row)];
+    if (opts.full) {
+      ops.push(sb.from("settings").upsert({ id: 1, active_source_url: program.sourceUrl || "", message_template: data.messageTemplate }));
+      if (data.readers.length) ops.push(sb.from("readers").upsert(data.readers));
+      if (data.admins.length) ops.push(sb.from("admins").upsert(data.admins));
+    }
     const results = await Promise.all(ops);
     results.forEach(r => { if (r.error) throw r.error; });
   },

@@ -63,6 +63,7 @@ const state = {
   bodyOpenIds: {},
   answerEditIds: {},
   answerFontStep: 0,
+  syncBase: null,
   capture: null,
   captureBusy: false
 };
@@ -110,8 +111,15 @@ function persistData() {
       intro: P.intro, items: P.items, savedAt: Date.now()
     };
   }
-  Store.saveData(state.data).catch(err => console.error("저장 실패:", err));
+  // Saves run one at a time so an older save can never land after a newer one,
+  // and refreshData() waits for them so a fetch can't overtake an unsent edit.
+  saveChain = saveChain.then(async () => {
+    const snap = snapshotProgram(state.data.program);
+    await Store.saveData(state.data, { base: state.syncBase, full: isOwner() });
+    state.syncBase = snap;
+  }).catch(err => console.error("저장 실패:", err));
 }
+let saveChain = Promise.resolve();
 
 // Re-pulls program + readers + admins + archive from Supabase so this
 // device sees what other devices/people have changed. Used on login and on
@@ -119,8 +127,10 @@ function persistData() {
 // fights with the "no re-render mid-edit" rule elsewhere in this file.
 async function refreshData() {
   try {
+    await saveChain;
     const [data, archive] = await Promise.all([Store.getData(), Store.getArchive()]);
     state.data = data;
+    state.syncBase = snapshotProgram(data.program);
     state.archive = archive;
     if (!findItem(state.selectedId) && state.data.program.items.length) state.selectedId = state.data.program.items[0].id;
     return true;
