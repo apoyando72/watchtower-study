@@ -22,6 +22,8 @@ function saveFontStep(step) {
   try { localStorage.setItem(fontStepStorageKey(), String(step)); } catch (e) {}
 }
 
+const INTRO_ID = "__intro__";
+
 const state = {
   data: { program: { sourceUrl: "", issue: "", title: "", subtitle: "", intro: "", items: [] }, readers: [], admins: [], messageTemplate: "", attendanceManagers: { left: "", right: "" }, orderNotes: "" },
   notesEditing: false,
@@ -132,7 +134,7 @@ async function refreshData() {
     state.data = data;
     state.syncBase = snapshotProgram(data.program);
     state.archive = archive;
-    if (!findItem(state.selectedId) && state.data.program.items.length) state.selectedId = state.data.program.items[0].id;
+    if (state.selectedId !== INTRO_ID && !findItem(state.selectedId) && state.data.program.items.length) state.selectedId = state.data.program.items[0].id;
     return true;
   } catch (e) {
     console.error("불러오기 실패:", e);
@@ -634,6 +636,7 @@ function editSummary() {
 function insertIndexAfterSelected() {
   const list = state.data.program.items;
   const i = list.findIndex(it => it.id === state.selectedId);
+  if (state.selectedId === INTRO_ID) return 0;
   return i === -1 ? list.length : i + 1;
 }
 
@@ -711,6 +714,7 @@ function renderEdit() {
   const owner = isOwner();
   const editorOnly = isEditorOnly();
   const sel = findItem(state.selectedId);
+  const introSelected = state.selectedId === INTRO_ID;
 
   const top = [];
 
@@ -790,7 +794,19 @@ function renderEdit() {
   });
 
   const detail = h("div", { class: "detail-panel" });
-  if (sel) {
+  if (introSelected) {
+    const P = state.data.program;
+    detail.appendChild(h("div", { class: "detail-title" }, "상세 편집 · 서론"));
+    if (owner) {
+      const introEl = liveInput(h("textarea", { class: "input", rows: 14, value: P.intro, style: "font-size:15px;line-height:1.8;", placeholder: "예: 오늘 살펴볼 기사를 소개하는 인사말이나 서론을 적어 두세요." }), v => P.intro = v);
+      introEl.value = P.intro;
+      introEl.addEventListener("blur", persistData);
+      detail.appendChild(field("서론 (1항 앞에 진행 화면에서 표시됩니다)", introEl));
+      detail.appendChild(h("div", { style: "font-size:12px;color:var(--ink-4);" }, "줄바꿈은 진행 화면에 그대로 표시됩니다."));
+    } else {
+      detail.appendChild(h("div", { class: "readonly-box" }, h("div", { class: "body" }, P.intro || "서론이 비어 있습니다.")));
+    }
+  } else if (sel) {
     const illus = isIllustration(sel);
     const comment = isComment(sel);
     const divider = isDivider(sel);
@@ -917,19 +933,17 @@ function renderEdit() {
   }
 
   let introCard = null;
-  if (owner) {
-    const P = state.data.program;
-    const introEl = liveInput(h("textarea", { class: "input", rows: 3, value: P.intro, placeholder: "예: 오늘 살펴볼 기사를 소개하는 인사말이나 서론을 적어 두세요." }), v => P.intro = v);
-    introEl.value = P.intro;
-    introEl.addEventListener("blur", persistData);
-    introCard = h("div", { class: "card", style: "display:flex;flex-direction:column;gap:8px;" },
-      h("div", { style: "font-size:13px;font-weight:700;" }, "서론 (1항 앞에 진행 화면에서 표시됩니다)"),
-      introEl
-    );
-  } else if (state.data.program.intro) {
-    introCard = h("div", { class: "card", style: "display:flex;flex-direction:column;gap:8px;" },
-      h("div", { style: "font-size:13px;font-weight:700;color:var(--ink-3);" }, "서론"),
-      h("div", { style: "white-space:pre-wrap;" }, state.data.program.intro)
+  const introText = state.data.program.intro || "";
+  if (owner || introText.trim()) {
+    introCard = h("div", { class: "para-card" + (introSelected ? " selected" : "") },
+      h("div", { class: "para-card-top", onclick: () => { state.selectedId = INTRO_ID; render(); } },
+        h("div", { class: "para-meta-row" },
+          h("span", { class: "chip-num" }, "서론"),
+          h("span", { class: "para-heading" }, "1항 앞에 표시")
+        ),
+        h("div", { style: "font-size:14px;line-height:1.6;color:var(--ink-2);white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;" },
+          introText.trim() ? introText : "서론을 입력하세요")
+      )
     );
   }
 

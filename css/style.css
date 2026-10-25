@@ -253,7 +253,7 @@ p.section-desc { margin: 0; font-size: 13px; color: var(--ink-3); }
 .stage-issue { font-size: 13px; color: var(--ink-4); }
 .stage-title { font-family: var(--serif); font-weight: 800; font-size: 26px; line-height: 1.4; }
 .stage-subtitle { font-size: 14px; color: var(--ink-3); }
-.stage-intro { font-size: 16px; line-height: 1.85; color: var(--ink-2); font-style: italic; }
+.stage-intro { font-size: 16px; line-height: 1.85; color: var(--ink-2); font-style: italic; white-space: pre-wrap; }
 
 .stage-section-heading { font-family: var(--serif); font-weight: 700; font-size: 20px; text-align: center; margin-top: 8px; }
 .stage-para-num { font-weight: 700; color: var(--accent); }
