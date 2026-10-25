@@ -1942,13 +1942,17 @@ function renderStage() {
       return;
     }
 
-    if (item.heading && item.heading !== lastHeading) {
+    const illus = isIllustration(item);
+    // Only paragraphs carry section headings. An illustration's heading is just
+    // its own label (e.g. "8항"); treating it as a section made the next
+    // paragraph repeat the real heading even though the section hadn't changed.
+    if (!illus && item.heading && item.heading !== lastHeading) {
       blocks.push(h("div", { class: "stage-section-heading" }, item.heading));
       lastHeading = item.heading;
     }
 
-    const illus = isIllustration(item);
     if (illus) {
+      if (item.heading) blocks.push(h("div", { class: "chip-num stage-tag" }, item.heading));
       if (item.image) blocks.push(h("img", { class: "stage-illustration-img", src: item.image }));
       if (item.body) blocks.push(collapsibleBody("삽화 본문", h("div", { class: "stage-para-text" }, item.body)));
       if (item.question) {
